@@ -26,7 +26,7 @@ The action learning agent uses a CNN-based model to predict which actions (ACTIO
 ### Step 1: Clone Repository
 ```bash
 git clone --recurse-submodules git@github.com:DriesSmit/ARC3-solution.git
-cd ARC3
+cd ARC3-solution
 ```
 
 ### Step 2: Create Environment File
