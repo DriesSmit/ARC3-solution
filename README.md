@@ -53,6 +53,12 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(
 from custom_agent import *
 ```
 
+Also, add the following field to the `FrameData` class in `ARC-AGI-3-Agents/agents/structs.py` (after the `full_reset` field):
+
+```python
+available_actions: list[GameAction] = Field(default_factory=list)
+```
+
 ### Step 5: Run the Action Agent
 ```bash
 make action
@@ -92,15 +98,16 @@ make tensorboard
 
 ```
 ARC3/
-├── custom_agents/
-│   ├── action.py          # Main action learning agent
-│   ├── view_utils.py      # Visualization utilities
-│   └── __init__.py        # Agent registration
 ├── ARC-AGI-3-Agents/      # Competition framework (submodule)
+├── custom_agents/
+│   ├── __init__.py        # Agent registration
+│   ├── action.py          # Main action learning agent
+│   └── view_utils.py      # Visualization utilities
+├── custom_agents.py       # Agent imports
+├── Makefile               # Build commands
+├── README.md              # This file
 ├── requirements.txt       # Python dependencies
-├── utils.py              # Shared utilities
-├── Makefile              # Build commands
-└── README.md             # This file
+└── utils.py               # Shared utilities
 ```
 
 ## Additional Usage Examples
