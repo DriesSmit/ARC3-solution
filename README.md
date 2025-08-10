@@ -53,7 +53,7 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(
 from custom_agent import *
 ```
 
-Also (if [this](https://github.com/arcprize/ARC-AGI-3-Agents/pull/46) has not been merged yet), add the following field to the `FrameData` class in `ARC-AGI-3-Agents/agents/structs.py` (after the `full_reset` field):
+Also, add the following field to the `FrameData` class in `ARC-AGI-3-Agents/agents/structs.py` (after the `full_reset` field):
 
 ```python
 available_actions: list[GameAction] = Field(default_factory=list)
