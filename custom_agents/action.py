@@ -168,11 +168,34 @@ class Action(Agent):
         if self.save_action_visualizations:
             self.logger.info(f"Action visualizations enabled: saving {self.vis_samples_per_save} samples every {self.vis_save_frequency} steps")
 
-    def _sample_from_combined_output(self, combined_logits: torch.Tensor) -> tuple[int, int, int, np.ndarray]:
-        """Sample from combined 5 + 64x64 action space."""
+    def _sample_from_combined_output(self, combined_logits: torch.Tensor, available_actions: list[int] = None) -> tuple[int, int, int, np.ndarray]:
+        """Sample from combined 5 + 64x64 action space with masking for invalid actions."""
         # Split logits
         action_logits = combined_logits[:5]  # First 5
         coord_logits = combined_logits[5:]   # Remaining 4096
+        
+        # Apply masking based on available_actions if provided
+        if available_actions is not None and len(available_actions) > 0:
+            # Create mask for action logits (ACTION1-ACTION5 = indices 0-4)
+            action_mask = torch.full_like(action_logits, float('-inf'))
+            action6_available = False
+            
+            for action in available_actions:
+                # Extract action value if it's a GameAction enum
+                action_id = action.value
+                
+                if 1 <= action_id <= 5:  # ACTION1-ACTION5
+                    action_mask[action_id - 1] = 0.0  # Unmask valid actions
+                elif action_id == 6:  # ACTION6
+                    action6_available = True
+            
+            # Apply mask to action logits
+            action_logits = action_logits + action_mask
+            
+            # If ACTION6 (coordinate action) is not available, mask all coordinate logits
+            if not action6_available:
+                coord_mask = torch.full_like(coord_logits, float('-inf'))
+                coord_logits = coord_logits + coord_mask
         
         # Apply sigmoid
         action_probs = torch.sigmoid(action_logits)
@@ -275,16 +298,17 @@ class Action(Agent):
         self.optimizer.step()
         
         # Log training metrics
-        self.writer.add_scalar('Training/total_loss', total_loss.item(), self.action_counter)
-        self.writer.add_scalar('Training/main_loss', main_loss.item(), self.action_counter)
-        self.writer.add_scalar('Training/action_entropy', action_entropy.item(), self.action_counter)
-        self.writer.add_scalar('Training/coord_entropy', coord_entropy.item(), self.action_counter)
-        self.writer.add_scalar('Training/action_entropy_coeff', action_coeff, self.action_counter)
-        self.writer.add_scalar('Training/coord_entropy_coeff', coord_coeff, self.action_counter)
+        if self.save_action_visualizations:
+            self.writer.add_scalar('Training/total_loss', total_loss.item(), self.action_counter)
+            self.writer.add_scalar('Training/main_loss', main_loss.item(), self.action_counter)
+            self.writer.add_scalar('Training/action_entropy', action_entropy.item(), self.action_counter)
+            self.writer.add_scalar('Training/coord_entropy', coord_entropy.item(), self.action_counter)
+            self.writer.add_scalar('Training/action_entropy_coeff', action_coeff, self.action_counter)
+            self.writer.add_scalar('Training/coord_entropy_coeff', coord_coeff, self.action_counter)
         
-        # Simple accuracy calculation
-        accuracy = ((torch.sigmoid(selected_logits) > 0.5) == rewards).float().mean()
-        self.writer.add_scalar('Training/accuracy', accuracy.item(), self.action_counter)
+            # Simple accuracy calculation
+            accuracy = ((torch.sigmoid(selected_logits) > 0.5) == rewards).float().mean()
+            self.writer.add_scalar('Training/accuracy', accuracy.item(), self.action_counter)
         
         # Clean up GPU memory
         torch.cuda.empty_cache() if torch.cuda.is_available() else None
@@ -304,10 +328,12 @@ class Action(Agent):
     def choose_action(
         self, frames: list[FrameData], latest_frame: FrameData
     ) -> GameAction:
+
         """Choose action using action model predictions."""
         # Check if score has changed and log score at action count
         if latest_frame.score != self.current_score:
-            self.writer.add_scalar('Agent/score', latest_frame.score, self.action_counter)
+            if self.save_action_visualizations:
+                self.writer.add_scalar('Agent/score', latest_frame.score, self.action_counter)
             self.logger.info(f"Score changed from {self.current_score} to {latest_frame.score} at action {self.action_counter}")
             print(f"Score changed from {self.current_score} to {latest_frame.score} at action {self.action_counter}")
             
@@ -341,6 +367,7 @@ class Action(Agent):
             action = GameAction.RESET
             action.reasoning = "Game needs reset."
             return action
+
 
         # Convert current frame to tensor
         current_frame = self._frame_to_tensor(latest_frame)
@@ -376,8 +403,9 @@ class Action(Agent):
                 self.experience_hashes.add(experience_hash)
                 
                 # Log replay buffer size periodically
-                self.writer.add_scalar('Agent/replay_buffer_size', len(self.experience_buffer), self.action_counter)
-                self.writer.add_scalar('Agent/replay_unique_hashes', len(self.experience_hashes), self.action_counter)
+                if self.save_action_visualizations:
+                    self.writer.add_scalar('Agent/replay_buffer_size', len(self.experience_buffer), self.action_counter)
+                    self.writer.add_scalar('Agent/replay_unique_hashes', len(self.experience_hashes), self.action_counter)
         
         # Get action predictions from action model
         with torch.no_grad():
@@ -385,7 +413,7 @@ class Action(Agent):
             combined_logits = combined_logits.squeeze(0)  # (5 + 4096,)
             
             # Sample from combined action space
-            action_idx, coords, coord_idx, all_probs = self._sample_from_combined_output(combined_logits)
+            action_idx, coords, coord_idx, all_probs = self._sample_from_combined_output(combined_logits, latest_frame.available_actions)
             
             if action_idx < 5:
                 # Selected ACTION1-ACTION5
@@ -396,7 +424,7 @@ class Action(Agent):
                 selected_action = GameAction.ACTION6
                 y, x = coords
                 selected_action.set_data({"x": x, "y": y})
-                selected_action.reasoning = "Dunno. Just felt like it."
+                selected_action.reasoning = "I felt like it."
                 
         
         # Store current frame and action for next experience creation
@@ -440,21 +468,22 @@ class Action(Agent):
             # self.logger.info(f"Saved {VIS_SAMPLES_PER_SAVE} action visualizations at step {self.action_counter}")
         
         # Log metrics
-        self.writer.add_scalar('Agent/total_actions', self.action_counter, self.action_counter)
-        
-        # Extract action and coordinate probabilities for logging
-        action_probs_only = all_probs[:5]
-        coord_probs_only = all_probs[5:]
-        
-        if action_idx < 5:
-            self.writer.add_scalar('Agent/selected_action_prob', action_probs_only[action_idx], self.action_counter)
-        else:
-            # Selected coordinate action - log coordinate probability
-            self.writer.add_scalar('Agent/selected_coord_prob', coord_probs_only[coord_idx], self.action_counter)
-            self.writer.add_scalar('Agent/coord_entropy', -(coord_probs_only * np.log(coord_probs_only + 1e-8)).sum(), self.action_counter)
-            # self.writer.add_scalar('Agent/max_coord_prob', coord_probs_only.max(), self.action_counter)
-        
-        # self.writer.add_scalar('Agent/max_action_prob', action_probs_only.max(), self.action_counter)
-        # self.writer.add_scalar('Agent/coord_sum_prob', coord_probs_only.sum(), self.action_counter)
+        if self.save_action_visualizations:
+            self.writer.add_scalar('Agent/total_actions', self.action_counter, self.action_counter)
+            
+            # Extract action and coordinate probabilities for logging
+            action_probs_only = all_probs[:5]
+            coord_probs_only = all_probs[5:]
+            
+            if action_idx < 5:
+                self.writer.add_scalar('Agent/selected_action_prob', action_probs_only[action_idx], self.action_counter)
+            else:
+                # Selected coordinate action - log coordinate probability
+                self.writer.add_scalar('Agent/selected_coord_prob', coord_probs_only[coord_idx], self.action_counter)
+                self.writer.add_scalar('Agent/coord_entropy', -(coord_probs_only * np.log(coord_probs_only + 1e-8)).sum(), self.action_counter)
+                # self.writer.add_scalar('Agent/max_coord_prob', coord_probs_only.max(), self.action_counter)
+            
+            # self.writer.add_scalar('Agent/max_action_prob', action_probs_only.max(), self.action_counter)
+            # self.writer.add_scalar('Agent/coord_sum_prob', coord_probs_only.sum(), self.action_counter)
         
         return selected_action
