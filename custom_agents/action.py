@@ -347,7 +347,7 @@ class Action(Agent):
             print("Reset entropy scheduler for new level - starting with high exploration")
             
             # Reset network and optimizer for new level
-            # TODO: Try not resetting the netwokrs now. Perhaps it works even better.
+            # TODO: Try not resetting the networks here. Perhaps it performs even better.
             self.action_model = ActionModel(input_channels=self.num_colours, grid_size=self.grid_size).to(self.device)
             self.optimizer = optim.Adam(self.action_model.parameters(), lr=0.0001)
             self.logger.info(f"Reset action model and optimizer for new level")
