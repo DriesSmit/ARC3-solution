@@ -418,13 +418,13 @@ class Action(Agent):
             if action_idx < 5:
                 # Selected ACTION1-ACTION5
                 selected_action = self.action_list[action_idx]
-                selected_action.reasoning = "We ball."
+                selected_action.reasoning = f"{selected_action.name} (prob: {all_probs[action_idx]:.3f})"
             else:
                 # Selected a coordinate - treat as ACTION6
                 selected_action = GameAction.ACTION6
                 y, x = coords
                 selected_action.set_data({"x": x, "y": y})
-                selected_action.reasoning = "I felt like it."
+                selected_action.reasoning = f"ACTION6 at ({x}, {y}) (prob: {all_probs[coord_idx]:.3f})"
                 
         
         # Store current frame and action for next experience creation
